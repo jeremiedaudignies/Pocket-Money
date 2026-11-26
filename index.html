@@ -79,7 +79,7 @@
   .item input[type=checkbox]{width:22px;height:22px}
   .item .del{justify-self:start}
   .sheet input[type=password]{width:100%;font-size:16px;padding:10px;border:1px solid var(--line);border-radius:10px}
-  .acc{display:grid;grid-template-columns:1fr auto auto;gap:6px 14px;align-items:center;font-size:14px;margin-top:8px}
+  .acc{display:grid;grid-template-columns:1fr auto auto auto;gap:6px 14px;align-items:center;font-size:14px;margin-top:8px}
   .acc .h{font-size:12px;color:var(--ink3)}
   .acc input{width:22px;height:22px}
   .acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
@@ -451,9 +451,12 @@ function render(){
 function renderAccList(){
   const box=document.getElementById('accList');
   if(!CACHE || !CACHE.accounts){ box.innerHTML=''; return; }
-  box.innerHTML = `<label>Comptes Wallet</label><div class="acc"><span class="h">Compte</span><span class="h">Inclus</span><span class="h">Mobilisable</span>
-    ${CACHE.accounts.map(a=>{ const c=accCfg(a); return `
+  box.innerHTML = `<label>Comptes Wallet</label><div class="acc"><span class="h">Compte</span><span class="h" style="text-align:right">Solde calculé</span><span class="h">Inclus</span><span class="h">Mobilisable</span>
+    ${CACHE.accounts.map(a=>{ const c=accCfg(a);
+      const solde = a.balance ?? Object.values(CACHE.records).reduce((s,r)=> r[0]===a.id ? s+r[2] : s, a.initial);
+      return `
       <span>${esc(a.name)}</span>
+      <span class="num" style="text-align:right;white-space:nowrap">${eur(solde)}</span>
       <input type="checkbox" data-id="${esc(a.id)}" data-k="inclus" ${c.inclus?'checked':''} aria-label="Inclure ${esc(a.name)}">
       <input type="checkbox" data-id="${esc(a.id)}" data-k="mobilisable" ${c.mobilisable?'checked':''} aria-label="${esc(a.name)} mobilisable">`; }).join('')}</div>`;
 }
