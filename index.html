@@ -681,7 +681,7 @@ async function doSync(full){
   $('refresh').addEventListener('click', ()=>doSync(false));
   $('openSettings').addEventListener('click', ()=>{ $('token').value=CFG.token; $('relais').value=CFG.relais||''; renderAccList(); renderEditors(); $('settings').classList.add('open'); });
   $('closeSettings').addEventListener('click', ()=>{ $('settings').classList.remove('open'); render(); });
-  $('saveToken').addEventListener('click', ()=>{ CFG.token=$('token').value.trim(); CFG.relais=$('relais').value.trim(); save(K_CFG,CFG); CACHE=null; localStorage.removeItem(K_CACHE); doSync(true); });
+  $('saveToken').addEventListener('click', ()=>{ CFG.token=$('token').value.replace(/\s+/g,''); CFG.relais=$('relais').value.trim(); save(K_CFG,CFG); CACHE=null; localStorage.removeItem(K_CACHE); doSync(true); });
   $('fullSync').addEventListener('click', ()=>doSync(true));
   $('wipe').addEventListener('click', ()=>{ try{ localStorage.removeItem(K_CFG); localStorage.removeItem(K_CACHE); }catch(e){}
     CFG={token:'',accounts:{}}; CACHE=null; $('token').value=''; $('relais').value=''; renderAccList(); renderEditors(); setStatus(''); render(); });
@@ -708,11 +708,14 @@ $('copyCfg').addEventListener('click', async ()=>{
   });
   $('importCfg').addEventListener('click', ()=>{
     try{
-      const o = JSON.parse($('cfgText').value.trim());
+      const brut = $('cfgText').value
+        .replace(/[\u201C\u201D\u201E\u00AB\u00BB]/g,'"').replace(/[\u2018\u2019]/g,"'") // guillemets typographiques
+        .replace(/[\r\n\u2028\u2029\u200B\u00A0]+/g,'').trim();                         // retours à la ligne, espaces invisibles
+      const o = JSON.parse(brut);
       if(!o || typeof o!=='object' || Array.isArray(o)) throw 0;
       ['accounts','cartes','prets','poches','relais','depComptes','budget'].forEach(k=>{ if(o[k]!==undefined) CFG[k]=o[k]; });
-      const avecJeton = typeof o.token==='string' && o.token.trim();
-      if(avecJeton) CFG.token = o.token.trim();
+      const avecJeton = typeof o.token==='string' && o.token.replace(/\s+/g,'');
+      if(avecJeton) CFG.token = avecJeton;
       save(K_CFG,CFG); $('cfgText').value=''; $('token').value=CFG.token; $('relais').value=CFG.relais||'';
       renderAccList(); renderEditors(); render();
       setStatus(avecJeton ? 'Réglages et jeton importés : synchronisation…' : 'Réglages importés.');
