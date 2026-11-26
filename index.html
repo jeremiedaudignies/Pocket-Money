@@ -94,6 +94,12 @@
   .op .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .op .t small{color:var(--ink3);margin-left:4px}
   .op .m{white-space:nowrap;text-align:right}
+  .bil{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:4px}
+  .bil .n{font-size:13px;color:var(--ink2)} .bil .v{font-size:22px;font-weight:700;margin-top:2px;white-space:nowrap}
+  .pos{color:#1e7a46} .neg{color:var(--warn)}
+  .cat{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;font-size:14px;margin-top:9px}
+  .cat .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap} .cat .m{color:var(--ink2);white-space:nowrap}
+  .cat .bar{grid-column:1 / -1;height:8px}
 </style>
 </head>
 <body>
@@ -106,7 +112,9 @@
 <div class="grid">
   <div style="display:grid;gap:14px;align-content:start">
     <section class="card" id="richesse"></section>
+    <section class="card" id="bilan"></section>
     <section class="card" id="depenses"></section>
+    <section class="card" id="categories"></section>
     <section class="card" id="depComptes"></section>
   </div>
   <div style="display:grid;gap:14px;align-content:start">
@@ -200,13 +208,14 @@ function fakeData(){
   };
 
   const cartesOps = [
-    {date:`${y}-${String(m+1).padStart(2,'0')}-${String(Math.max(d-1,1)).padStart(2,'0')}`, libelle:'Supermarché', montant:86.4, qui:'Carte papa'},
-    {date:`${y}-${String(m+1).padStart(2,'0')}-${String(Math.max(d-3,1)).padStart(2,'0')}`, libelle:'Station-service', montant:62.1, qui:'Carte maman'},
-    {date:`${y}-${String(m+1).padStart(2,'0')}-01`, libelle:'Pharmacie', montant:18.9, qui:'Carte papa'}];
-  const depComptes = {comptes:'SG Compte Joint', total:1240, ops:[
+    {date:`${y}-${String(m+1).padStart(2,'0')}-${String(Math.max(d-1,1)).padStart(2,'0')}`, libelle:'Supermarché', montant:86.4, cat:'Alimentation'},
+    {date:`${y}-${String(m+1).padStart(2,'0')}-${String(Math.max(d-3,1)).padStart(2,'0')}`, libelle:'Station-service', montant:62.1, cat:'Carburant'},
+    {date:`${y}-${String(m+1).padStart(2,'0')}-01`, libelle:'Pharmacie', montant:18.9, cat:'Santé'}];
+  const cartesCat = [{nom:'Alimentation',montant:640},{nom:'Shopping',montant:310},{nom:'Carburant',montant:220},{nom:'Santé',montant:120},{nom:'Loisirs',montant:62}];
+  const depComptes = {comptes:'SG Compte Joint', total:1240, revenus:4200, ops:[
     {date:`${y}-${String(m+1).padStart(2,'0')}-05`, libelle:'Prêt immobilier', montant:980, qui:''},
     {date:`${y}-${String(m+1).padStart(2,'0')}-03`, libelle:'Électricité', montant:260, qui:''}]};
-  return {maj:now, comptes, total, mois, jours, cartes, cartesOps, depComptes, prets, poches};
+  return {maj:now, comptes, total, mois, jours, cartes, cartesOps, cartesCat, depComptes, prets, poches};
 }
 
 /* ------------------------------------------------------------------ */
@@ -315,7 +324,7 @@ const montant = v => { if(v==null) return null; if(typeof v==='object') v = v.va
 async function sync(forceFull){
   if(!CFG.token) return false;
   const now=new Date(), today=now.toISOString().slice(0,10);
-  const full = forceFull || !CACHE || CACHE.v !== 3 || CACHE.lastFull !== today;
+  const full = forceFull || !CACHE || CACHE.v !== 4 || CACHE.lastFull !== today;
   const accounts = await fetchAll('/accounts','accounts',{});
   const params = {recordDate:'gte.1990-01-01'}; // annule la fenêtre par défaut de 3 mois
   if(!full) params.updatedAt = 'gte.'+CACHE.lastSync;
@@ -325,9 +334,10 @@ async function sync(forceFull){
     if(r.recordState==='void'){ delete records[r.id]; return; }
     records[r.id]=[r.accountId, String(r.recordDate).slice(0,10), Number(r.amount?.value)||0, r.recordType, r.transferId?1:0,
       [r.payee, r.payer, r.note, r.counterParty].filter(Boolean).join(' ').toLowerCase(),
-      String(r.payee || r.counterParty || r.note || r.category?.name || 'Opération').trim().slice(0,80)];
+      String(r.payee || r.counterParty || r.note || r.category?.name || 'Opération').trim().slice(0,80),
+      String(r.category?.name || 'Non classé')];
   });
-  CACHE = {v:3, accounts: accounts.map(a=>({id:a.id, name:a.name, type:a.accountType, archived:a.archived,
+  CACHE = {v:4, accounts: accounts.map(a=>({id:a.id, name:a.name, type:a.accountType, archived:a.archived,
             exclude:a.excludeFromStats, initial: montant(a.balance?.initial) ?? montant(a.initialBalance) ?? 0,
             balance: montant(a.balance?.currentBalance) ?? montant(a.balance?.rawCurrentBalance) ?? null})),
            records, lastSync: now.toISOString(), lastFull: full ? today : CACHE.lastFull};
@@ -345,6 +355,9 @@ function accCfg(a){
 }
 
 /* Modèle réel (richesse) à partir du cache */
+// Prélèvement mensuel des cartes à débit différé (exclu des dépenses comptes : déjà compté dans les CB)
+const PRELEV_CARTE = /(d[ée]bit mensuel|factures? cartes?|relev[ée]s? (de )?cartes?|total cartes?|arr[eê]t[ée] cartes?|d[ée]bit diff[ée]r[ée])/i;
+
 function soldeActuel(a){
   return a.balance ?? Object.values(CACHE.records).reduce((s,r)=> r[0]===a.id ? s+r[2] : s, a.initial);
 }
@@ -385,17 +398,25 @@ function realModel(){
     M.cartesOps = cartes.flatMap(c=>{
       const f = (c.filtre||'').trim().toLowerCase();
       return allRecs.filter(r=> r[0]===c.compte && r[1]>=debut && r[1]<=todayIso && r[3]==='expense' && !r[4]
-                    && (!f || (r[5]||'').includes(f))).map(r=>({date:r[1], libelle:esc(r[6]||'Opération'), montant:-r[2], qui:esc(c.nom||'')}));
+                    && (!f || (r[5]||'').includes(f))).map(r=>({date:r[1], libelle:esc(r[6]||'Opération'), montant:-r[2], cat:r[7]||'Non classé'}));
     }).sort((a,b)=> b.date.localeCompare(a.date));
+    const parCat = {}; M.cartesOps.forEach(o=>{ parCat[o.cat]=(parCat[o.cat]||0)+o.montant; });
+    let cats = Object.entries(parCat).map(([nom,montant])=>({nom:esc(nom), montant})).sort((a,b)=>b.montant-a.montant);
+    if(cats.length>8){ const autres = cats.slice(7).reduce((s,c)=>s+c.montant,0); cats = [...cats.slice(0,7), {nom:'Autres', montant:autres}]; }
+    M.cartesCat = cats;
   }
 
   const depC = (CFG.depComptes||[]).filter(c=>c.compte);
   if(depC.length){
     const debut = iso(y,m,1), ids2 = new Set(depC.map(c=>c.compte));
-    const ops = allRecs.filter(r=> ids2.has(r[0]) && r[1]>=debut && r[1]<=todayIso && r[3]==='expense' && !r[4])
+    const motsExclus = depC.flatMap(c=>(c.exclure||'').split(',')).map(t=>t.trim().toLowerCase()).filter(Boolean);
+    const estPrelCarte = r => PRELEV_CARTE.test(r[5]||'') || motsExclus.some(t=>(r[5]||'').includes(t));
+    const duMois = r => ids2.has(r[0]) && r[1]>=debut && r[1]<=todayIso && !r[4];
+    const revenus = allRecs.filter(r=> duMois(r) && r[3]==='income').reduce((s,r)=>s+r[2],0);
+    const ops = allRecs.filter(r=> duMois(r) && r[3]==='expense' && !estPrelCarte(r))
       .map(r=>({date:r[1], libelle:esc(r[6]||'Opération'), montant:-r[2], qui: depC.length>1 ? esc(accNom(r[0])) : ''}))
       .sort((a,b)=> b.date.localeCompare(a.date));
-    M.depComptes = {comptes: depC.map(c=>esc(accNom(c.compte))).join(' + '), total: ops.reduce((s,o)=>s+o.montant,0), ops};
+    M.depComptes = {comptes: depC.map(c=>esc(accNom(c.compte))).join(' + '), total: ops.reduce((s,o)=>s+o.montant,0), ops, revenus};
   }
 
   const prets = (CFG.prets||[]).filter(p=>p.debut && p.fin && Number(p.mensualite));
@@ -449,12 +470,24 @@ const opsHtml = ops => ops.length ? `<div class="ops">${ops.map(o=>`<div class="
     <h2>Dépenses CB${exIf('cartes')}</h2>
     <div class="big num">${eur(dep)}</div>
     <div class="sub num">soit <b>${pct(dep,bud)} %</b> de la cible (${eur(bud)})</div>
-    ${D.cartes.map(c=>`
-      <div class="row">
-        <div class="lbl num"><span>${c.nom}</span><span>${eur(c.depense)} / ${eur(c.budget)} · ${pct(c.depense,c.budget)} %</span></div>
-        ${bar(c.depense,c.budget)}
-      </div>`).join('')}
+    ${bar(dep,bud)}
     ${opsHtml(D.cartesOps)}`;
+
+  const totCat = D.cartesCat.reduce((s,c)=>s+c.montant,0);
+  document.getElementById('categories').innerHTML = `
+    <h2>Dépenses CB par catégorie${exIf('cartesCat')}</h2>
+    ${D.cartesCat.length ? D.cartesCat.map(c=>`<div class="cat num"><span class="t">${c.nom}</span><span class="m">${eur(c.montant)} · ${pct(c.montant,totCat)} %</span>${bar(c.montant,D.cartesCat[0].montant)}</div>`).join('')
+      : '<div class="hint">Aucune dépense ce mois-ci.</div>'}`;
+
+  const depTot = dep + D.depComptes.total, rev = D.depComptes.revenus||0, diff = rev - depTot;
+  document.getElementById('bilan').innerHTML = `
+    <h2>Bilan du mois${exIf('depComptes')}</h2>
+    <div class="bil num">
+      <div><div class="n">Revenus</div><div class="v">${eur(rev)}</div></div>
+      <div><div class="n">Dépenses</div><div class="v">${eur(depTot)}</div></div>
+      <div><div class="n">Différentiel</div><div class="v ${diff>=0?'pos':'neg'}">${diff>0?'+':''}${eur(diff)}</div></div>
+    </div>
+    <div class="hint">Revenus : ${D.depComptes.comptes} · Dépenses : CB + comptes</div>`;
 
   document.getElementById('depComptes').innerHTML = `
     <h2>Dépenses comptes${exIf('depComptes')}</h2>
@@ -510,7 +543,7 @@ function renderAccList(){
 const EDITORS = {
   cartes:{titre:'Cartes (dépenses du mois)', champs:[
     ['nom','Nom','text'],['compte','Compte','account'],['filtre','Mot-clé dans le libellé (facultatif)','text'],['budget','Budget mensuel (€)','number']]},
-  depComptes:{titre:'Dépenses comptes', champs:[['compte','Compte','account']]},
+  depComptes:{titre:'Dépenses et revenus comptes', champs:[['compte','Compte','account'],['exclure','Autres libellés à exclure (séparés par des virgules)','text']]},
   prets:{titre:'Prêts', champs:[
     ['nom','Nom','text'],['mensualite','Mensualité (€)','number'],['debut','1re échéance','date'],['fin','Dernière échéance','date']]},
   poches:{titre:'Poches (une poche = un compte)', champs:[
