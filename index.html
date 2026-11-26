@@ -126,7 +126,6 @@
       <button id="closeSettings">Fermer</button>
       <button id="fullSync">Resynchroniser tout</button>
       <button id="wipe">Effacer jeton et données</button>
-      <button id="diag">Diagnostic (temporaire)</button>
     </div>
     <p class="muted">Le jeton et les opérations restent uniquement sur cet appareil.</p>
   </div>
@@ -251,7 +250,6 @@ const K_CFG='budget.cfg', K_CACHE='budget.cache';
 const load=(k,def)=>{ try{ return JSON.parse(localStorage.getItem(k)) ?? def; }catch(e){ return def; } };
 const save=(k,v)=>{ try{ localStorage.setItem(k, JSON.stringify(v)); return true; }catch(e){ return false; } };
 let CFG = load(K_CFG, {token:'', accounts:{}});
-let RAW_ACCOUNTS = null, RAW_RECORD = null, RAW_NB = 0; // diagnostic temporaire
 let CACHE = load(K_CACHE, null); // {accounts:[], records:{id:[accountId, 'YYYY-MM-DD', montant, type, transfert]}, lastSync, lastFull}
 
 const esc = t => String(t ?? '').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -301,11 +299,9 @@ async function sync(forceFull){
   const now=new Date(), today=now.toISOString().slice(0,10);
   const full = forceFull || !CACHE || CACHE.v !== 2 || CACHE.lastFull !== today;
   const accounts = await fetchAll('/accounts','accounts',{});
-  RAW_ACCOUNTS = accounts;
   const params = {recordDate:'gte.1990-01-01'}; // annule la fenêtre par défaut de 3 mois
   if(!full) params.updatedAt = 'gte.'+CACHE.lastSync;
   const recs = await fetchAll('/records','records',params);
-  RAW_RECORD = recs[0] || null; RAW_NB = recs.length;
   const records = full ? {} : CACHE.records;
   recs.forEach(r=>{
     if(r.recordState==='void'){ delete records[r.id]; return; }
@@ -313,8 +309,8 @@ async function sync(forceFull){
       [r.payee, r.payer, r.note, r.counterParty].filter(Boolean).join(' ').toLowerCase()];
   });
   CACHE = {v:2, accounts: accounts.map(a=>({id:a.id, name:a.name, type:a.accountType, archived:a.archived,
-            exclude:a.excludeFromStats, initial: montant(a.initialBalance) ?? 0,
-            balance: montant(a.balance) ?? montant(a.currentBalance) ?? montant(a.actualBalance) ?? null})),
+            exclude:a.excludeFromStats, initial: montant(a.balance?.initial) ?? montant(a.initialBalance) ?? 0,
+            balance: montant(a.balance?.currentBalance) ?? montant(a.balance?.rawCurrentBalance) ?? null})),
            records, lastSync: now.toISOString(), lastFull: full ? today : CACHE.lastFull};
   if(!save(K_CACHE, CACHE)) setStatus("Mémoire de l'appareil pleine : les données ne sont pas conservées entre deux ouvertures.");
   return true;
@@ -525,14 +521,7 @@ async function doSync(full){
     else return;
     save(K_CFG,CFG); renderEditors(); render();
   });
-$('diag').addEventListener('click', async ()=>{
-    if(!RAW_ACCOUNTS){ setStatus('Lance d\'abord « Resynchroniser tout », puis réessaie.'); return; }
-    const masque = o => JSON.parse(JSON.stringify(o, (k,v)=> /bankAccountNumber|iban|payee|payer|note|counterParty|latitude|longitude|photos/i.test(k) ? '…' : v));
-    const txt = JSON.stringify({comptes: masque(RAW_ACCOUNTS.slice(0,3)), nbOperations: RAW_NB, exempleOperation: masque(RAW_RECORD)});
-    try{ await navigator.clipboard.writeText(txt); setStatus('Diagnostic copié : colle-le dans la conversation avec Claude.'); }
-    catch(e){ $('cfgText').value = txt; $('cfgText').select(); setStatus('Diagnostic placé dans le champ de texte : copie-le à la main.'); }
-  });
-  $('copyCfg').addEventListener('click', async ()=>{
+$('copyCfg').addEventListener('click', async ()=>{
     const {token, ...rest} = CFG; const txt = JSON.stringify(rest);
     try{ await navigator.clipboard.writeText(txt); setStatus('Réglages copiés : colle-les dans les Réglages de l\'autre appareil.'); }
     catch(e){ $('cfgText').value = txt; $('cfgText').select(); setStatus('Copie automatique refusée : le texte est sélectionné dans le champ, copie-le à la main.'); }
