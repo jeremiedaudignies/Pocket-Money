@@ -114,6 +114,12 @@
     </div>
     <div id="accList"></div>
     <div id="editors"></div>
+    <div class="ed"><h4>Copier vers un autre appareil</h4>
+      <p class="muted" style="margin-top:0">Copie les comptes, cartes, prêts et poches (sans le jeton). Sur l'autre appareil, colle le texte ci-dessous puis Importer.</p>
+      <div class="acts" style="margin-top:6px"><button id="copyCfg">Copier les réglages</button></div>
+      <textarea id="cfgText" rows="3" style="width:100%;font-size:16px;margin-top:8px;padding:8px;border:1px solid var(--line);border-radius:10px" placeholder="Colle ici les réglages copiés"></textarea>
+      <div class="acts" style="margin-top:6px"><button id="importCfg">Importer</button></div>
+    </div>
     <div class="acts">
       <button id="closeSettings">Fermer</button>
       <button id="fullSync">Resynchroniser tout</button>
@@ -503,6 +509,20 @@ async function doSync(full){
     else if(t.dataset.del){ CFG[t.dataset.del].splice(+t.dataset.i,1); }
     else return;
     save(K_CFG,CFG); renderEditors(); render();
+  });
+$('copyCfg').addEventListener('click', async ()=>{
+    const {token, ...rest} = CFG; const txt = JSON.stringify(rest);
+    try{ await navigator.clipboard.writeText(txt); setStatus('Réglages copiés : colle-les dans les Réglages de l\'autre appareil.'); }
+    catch(e){ $('cfgText').value = txt; $('cfgText').select(); setStatus('Copie automatique refusée : le texte est sélectionné dans le champ, copie-le à la main.'); }
+  });
+  $('importCfg').addEventListener('click', ()=>{
+    try{
+      const o = JSON.parse($('cfgText').value.trim());
+      if(!o || typeof o!=='object' || Array.isArray(o)) throw 0;
+      ['accounts','cartes','prets','poches'].forEach(k=>{ if(o[k]!==undefined) CFG[k]=o[k]; });
+      save(K_CFG,CFG); $('cfgText').value=''; renderAccList(); renderEditors(); render();
+      setStatus('Réglages importés.');
+    }catch(e){ setStatus('Texte non reconnu : recopie les réglages depuis l\'autre appareil.'); }
   });
   $('accList').addEventListener('change', e=>{
     const t=e.target; if(!t.dataset.id) return;
