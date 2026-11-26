@@ -322,20 +322,23 @@ function accCfg(a){
 }
 
 /* Modèle réel (richesse) à partir du cache */
+function soldeActuel(a){
+  return a.balance ?? Object.values(CACHE.records).reduce((s,r)=> r[0]===a.id ? s+r[2] : s, a.initial);
+}
+
 function realModel(){
   const now=new Date(), y=now.getFullYear(), m=now.getMonth(), d=now.getDate();
   const accs = CACHE.accounts.filter(a=>accCfg(a).inclus);
   const ids = new Set(accs.map(a=>a.id));
   const recs = Object.values(CACHE.records).filter(r=>ids.has(r[0]));
   const iso = (yy,mm,dd)=> new Date(Date.UTC(yy,mm,dd)).toISOString().slice(0,10);
-  const balAt = (accId, date) => { // solde d'un compte à la fin d'une date (incluse)
-    const a = accs.find(x=>x.id===accId);
-    return a.initial + recs.reduce((s,r)=> r[0]===accId && r[1]<=date ? s+r[2] : s, 0);
+  // Solde à une date = solde actuel − opérations postérieures (ancré sur le solde Wallet quand il existe)
+  const allRecs = Object.values(CACHE.records);
+  const balAt = (accId, date) => {
+    const a = CACHE.accounts.find(x=>x.id===accId); if(!a) return 0;
+    return soldeActuel(a) - allRecs.reduce((s,r)=> r[0]===accId && r[1]>date ? s+r[2] : s, 0);
   };
-  const comptes = accs.map(a=>{
-    const calc = balAt(a.id,'9999-12-31');
-    return {nom:a.name, solde: a.balance ?? calc, mobilisable: accCfg(a).mobilisable};
-  });
+  const comptes = accs.map(a=>({nom:a.name, solde: soldeActuel(a), mobilisable: accCfg(a).mobilisable}));
   const totalAt = date => accs.reduce((s,a)=>s+balAt(a.id,date),0);
   const mois=[]; for(let i=0;i<m;i++) mois.push({i, v: totalAt(iso(y,i+1,0))});
   const jours=[]; for(let j=1;j<=d;j++) jours.push({j, v: totalAt(iso(y,m,j))});
@@ -343,9 +346,7 @@ function realModel(){
   const M = {maj:new Date(CACHE.lastSync), comptes, total, mois, jours};
 
   // Soldes de tous les comptes (y compris non inclus) pour les poches
-  const allRecs = Object.values(CACHE.records);
-  const accBal = (id, date) => { const a = CACHE.accounts.find(x=>x.id===id); if(!a) return 0;
-    return a.initial + allRecs.reduce((s,r)=> r[0]===id && r[1]<=date ? s+r[2] : s, 0); };
+  const accBal = balAt;
   const accNom = id => (CACHE.accounts.find(a=>a.id===id)||{}).name || '—';
   const todayIso = iso(y,m,d);
 
@@ -453,7 +454,7 @@ function renderAccList(){
   if(!CACHE || !CACHE.accounts){ box.innerHTML=''; return; }
   box.innerHTML = `<label>Comptes Wallet</label><div class="acc"><span class="h">Compte</span><span class="h" style="text-align:right">Solde calculé</span><span class="h">Inclus</span><span class="h">Mobilisable</span>
     ${CACHE.accounts.map(a=>{ const c=accCfg(a);
-      const solde = a.balance ?? Object.values(CACHE.records).reduce((s,r)=> r[0]===a.id ? s+r[2] : s, a.initial);
+      const solde = soldeActuel(a);
       return `
       <span>${esc(a.name)}</span>
       <span class="num" style="text-align:right;white-space:nowrap">${eur(solde)}</span>
