@@ -109,13 +109,15 @@
     <h3>Réglages</h3>
     <label for="token">Jeton d'API Wallet (Paramètres → REST API, dans la version web)</label>
     <input type="password" id="token" autocomplete="off" placeholder="Colle ton jeton ici">
+    <label for="relais">Adresse du relais (si Wallet bloque l'accès direct)</label>
+    <input type="url" id="relais" autocomplete="off" placeholder="https://….workers.dev" style="width:100%;font-size:16px;padding:10px;border:1px solid var(--line);border-radius:10px">
     <div class="acts">
       <button id="saveToken">Enregistrer et synchroniser</button>
     </div>
     <div id="accList"></div>
     <div id="editors"></div>
     <div class="ed"><h4>Copier vers un autre appareil</h4>
-      <p class="muted" style="margin-top:0">Copie les comptes, cartes, prêts et poches (sans le jeton). Sur l'autre appareil, colle le texte ci-dessous puis Importer.</p>
+      <p class="muted" style="margin-top:0">Copie les comptes, cartes, prêts, poches et l'adresse du relais (sans le jeton). Sur l'autre appareil, colle le texte ci-dessous puis Importer.</p>
       <div class="acts" style="margin-top:6px"><button id="copyCfg">Copier les réglages</button></div>
       <textarea id="cfgText" rows="3" style="width:100%;font-size:16px;margin-top:8px;padding:8px;border:1px solid var(--line);border-radius:10px" placeholder="Colle ici les réglages copiés"></textarea>
       <div class="acts" style="margin-top:6px"><button id="importCfg">Importer</button></div>
@@ -256,14 +258,15 @@ const setStatus = t => { document.getElementById('status').textContent = t || ''
 /* ------------------------------------------------------------------
    API WALLET
    ------------------------------------------------------------------ */
-const API='https://rest.budgetbakers.com/wallet/v1/api';
+const API_DIRECT='https://rest.budgetbakers.com/wallet';
+const apiBase = () => ((CFG.relais||'').trim().replace(/\/+$/,'') || API_DIRECT) + '/v1/api';
 
 async function apiGet(path, params){
   const qs=new URLSearchParams();
   Object.entries(params||{}).forEach(([k,v])=>[].concat(v).forEach(x=>qs.append(k,x)));
   let r;
   try{
-    r = await fetch(`${API}${path}?${qs}`, {headers:{Authorization:'Bearer '+CFG.token, Accept:'application/json'}});
+    r = await fetch(`${apiBase()}${path}?${qs}`, {headers:{Authorization:'Bearer '+CFG.token, Accept:'application/json'}});
   }catch(e){
     throw new Error("Le navigateur a bloqué l'appel à Wallet (probablement une restriction CORS) : il faudra passer par un petit relais.");
   }
@@ -492,12 +495,12 @@ async function doSync(full){
 {
   const $=id=>document.getElementById(id);
   $('refresh').addEventListener('click', ()=>doSync(false));
-  $('openSettings').addEventListener('click', ()=>{ $('token').value=CFG.token; renderAccList(); renderEditors(); $('settings').classList.add('open'); });
+  $('openSettings').addEventListener('click', ()=>{ $('token').value=CFG.token; $('relais').value=CFG.relais||''; renderAccList(); renderEditors(); $('settings').classList.add('open'); });
   $('closeSettings').addEventListener('click', ()=>{ $('settings').classList.remove('open'); render(); });
-  $('saveToken').addEventListener('click', ()=>{ CFG.token=$('token').value.trim(); save(K_CFG,CFG); CACHE=null; localStorage.removeItem(K_CACHE); doSync(true); });
+  $('saveToken').addEventListener('click', ()=>{ CFG.token=$('token').value.trim(); CFG.relais=$('relais').value.trim(); save(K_CFG,CFG); CACHE=null; localStorage.removeItem(K_CACHE); doSync(true); });
   $('fullSync').addEventListener('click', ()=>doSync(true));
   $('wipe').addEventListener('click', ()=>{ try{ localStorage.removeItem(K_CFG); localStorage.removeItem(K_CACHE); }catch(e){}
-    CFG={token:'',accounts:{}}; CACHE=null; $('token').value=''; renderAccList(); renderEditors(); setStatus(''); render(); });
+    CFG={token:'',accounts:{}}; CACHE=null; $('token').value=''; $('relais').value=''; renderAccList(); renderEditors(); setStatus(''); render(); });
   $('editors').addEventListener('change', e=>{
     const t=e.target, k=t.dataset.l; if(!k) return;
     CFG[k][+t.dataset.i][t.dataset.f] = t.type==='checkbox' ? t.checked : t.value;
@@ -519,7 +522,7 @@ $('copyCfg').addEventListener('click', async ()=>{
     try{
       const o = JSON.parse($('cfgText').value.trim());
       if(!o || typeof o!=='object' || Array.isArray(o)) throw 0;
-      ['accounts','cartes','prets','poches'].forEach(k=>{ if(o[k]!==undefined) CFG[k]=o[k]; });
+      ['accounts','cartes','prets','poches','relais'].forEach(k=>{ if(o[k]!==undefined) CFG[k]=o[k]; });
       save(K_CFG,CFG); $('cfgText').value=''; renderAccList(); renderEditors(); render();
       setStatus('Réglages importés.');
     }catch(e){ setStatus('Texte non reconnu : recopie les réglages depuis l\'autre appareil.'); }
