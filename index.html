@@ -84,6 +84,16 @@
   .acc input{width:22px;height:22px}
   .acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
   .muted{font-size:12px;color:var(--ink3);margin-top:8px}
+  .ibtn{font:inherit;font-size:13px;font-weight:700;width:24px;height:24px;padding:0;border-radius:50%;
+    border:1.5px solid var(--ink3);color:var(--ink2);background:transparent;margin-left:8px;vertical-align:4px;line-height:1}
+  .info{display:none;font-size:13px;color:var(--ink2);background:var(--bg);border-radius:10px;padding:8px 10px;margin-top:8px}
+  .info.open{display:block}
+  .ops{max-height:260px;overflow:auto;margin-top:12px;border-top:1px solid var(--line);-webkit-overflow-scrolling:touch}
+  .op{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:baseline;font-size:14px;padding:7px 0;border-bottom:1px solid var(--line)}
+  .op .d{color:var(--ink3);font-size:12px}
+  .op .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .op .t small{color:var(--ink3);margin-left:4px}
+  .op .m{white-space:nowrap;text-align:right}
 </style>
 </head>
 <body>
@@ -97,6 +107,7 @@
   <div style="display:grid;gap:14px;align-content:start">
     <section class="card" id="richesse"></section>
     <section class="card" id="depenses"></section>
+    <section class="card" id="depComptes"></section>
   </div>
   <div style="display:grid;gap:14px;align-content:start">
     <section class="card" id="objectifs"></section>
@@ -188,7 +199,14 @@ function fakeData(){
     ]
   };
 
-  return {maj:now, comptes, total, mois, jours, cartes, prets, poches};
+  const cartesOps = [
+    {date:`${y}-${String(m+1).padStart(2,'0')}-${String(Math.max(d-1,1)).padStart(2,'0')}`, libelle:'Supermarché', montant:86.4, qui:'Carte papa'},
+    {date:`${y}-${String(m+1).padStart(2,'0')}-${String(Math.max(d-3,1)).padStart(2,'0')}`, libelle:'Station-service', montant:62.1, qui:'Carte maman'},
+    {date:`${y}-${String(m+1).padStart(2,'0')}-01`, libelle:'Pharmacie', montant:18.9, qui:'Carte papa'}];
+  const depComptes = {comptes:'SG Compte Joint', total:1240, ops:[
+    {date:`${y}-${String(m+1).padStart(2,'0')}-05`, libelle:'Prêt immobilier', montant:980, qui:''},
+    {date:`${y}-${String(m+1).padStart(2,'0')}-03`, libelle:'Électricité', montant:260, qui:''}]};
+  return {maj:now, comptes, total, mois, jours, cartes, cartesOps, depComptes, prets, poches};
 }
 
 /* ------------------------------------------------------------------ */
@@ -297,7 +315,7 @@ const montant = v => { if(v==null) return null; if(typeof v==='object') v = v.va
 async function sync(forceFull){
   if(!CFG.token) return false;
   const now=new Date(), today=now.toISOString().slice(0,10);
-  const full = forceFull || !CACHE || CACHE.v !== 2 || CACHE.lastFull !== today;
+  const full = forceFull || !CACHE || CACHE.v !== 3 || CACHE.lastFull !== today;
   const accounts = await fetchAll('/accounts','accounts',{});
   const params = {recordDate:'gte.1990-01-01'}; // annule la fenêtre par défaut de 3 mois
   if(!full) params.updatedAt = 'gte.'+CACHE.lastSync;
@@ -306,9 +324,10 @@ async function sync(forceFull){
   recs.forEach(r=>{
     if(r.recordState==='void'){ delete records[r.id]; return; }
     records[r.id]=[r.accountId, String(r.recordDate).slice(0,10), Number(r.amount?.value)||0, r.recordType, r.transferId?1:0,
-      [r.payee, r.payer, r.note, r.counterParty].filter(Boolean).join(' ').toLowerCase()];
+      [r.payee, r.payer, r.note, r.counterParty].filter(Boolean).join(' ').toLowerCase(),
+      String(r.payee || r.counterParty || r.note || r.category?.name || 'Opération').trim().slice(0,80)];
   });
-  CACHE = {v:2, accounts: accounts.map(a=>({id:a.id, name:a.name, type:a.accountType, archived:a.archived,
+  CACHE = {v:3, accounts: accounts.map(a=>({id:a.id, name:a.name, type:a.accountType, archived:a.archived,
             exclude:a.excludeFromStats, initial: montant(a.balance?.initial) ?? montant(a.initialBalance) ?? 0,
             balance: montant(a.balance?.currentBalance) ?? montant(a.balance?.rawCurrentBalance) ?? null})),
            records, lastSync: now.toISOString(), lastFull: full ? today : CACHE.lastFull};
@@ -363,6 +382,20 @@ function realModel(){
                     && (!f || (r[5]||'').includes(f))).reduce((s,r)=>s-r[2],0);
       return {nom:esc(c.nom||'Carte'), depense:dep, budget:Number(c.budget)||0};
     });
+    M.cartesOps = cartes.flatMap(c=>{
+      const f = (c.filtre||'').trim().toLowerCase();
+      return allRecs.filter(r=> r[0]===c.compte && r[1]>=debut && r[1]<=todayIso && r[3]==='expense' && !r[4]
+                    && (!f || (r[5]||'').includes(f))).map(r=>({date:r[1], libelle:esc(r[6]||'Opération'), montant:-r[2], qui:esc(c.nom||'')}));
+    }).sort((a,b)=> b.date.localeCompare(a.date));
+  }
+
+  const depC = (CFG.depComptes||[]).filter(c=>c.compte);
+  if(depC.length){
+    const debut = iso(y,m,1), ids2 = new Set(depC.map(c=>c.compte));
+    const ops = allRecs.filter(r=> ids2.has(r[0]) && r[1]>=debut && r[1]<=todayIso && r[3]==='expense' && !r[4])
+      .map(r=>({date:r[1], libelle:esc(r[6]||'Opération'), montant:-r[2], qui: depC.length>1 ? esc(accNom(r[0])) : ''}))
+      .sort((a,b)=> b.date.localeCompare(a.date));
+    M.depComptes = {comptes: depC.map(c=>esc(accNom(c.compte))).join(' + '), total: ops.reduce((s,o)=>s+o.montant,0), ops};
   }
 
   const prets = (CFG.prets||[]).filter(p=>p.debut && p.fin && Number(p.mensualite));
@@ -406,20 +439,28 @@ function render(){
   const mobNoms = real ? mob.map(c=>esc(c.nom)).join(' + ') : 'Livret A + LDD + comptes courants';
   document.getElementById('richesse').innerHTML = `
     <h2>Richesse totale</h2>
-    <div class="big num">${eur(D.total)}</div>
-    <div class="sub num">dont mobilisable <b>${eur(mobil)}</b> (${mobNoms})</div>
+    <div class="big num">${eur(D.total)}<button class="ibtn" id="infoBtn" aria-label="Détail du mobilisable" aria-expanded="false">i</button></div>
+    <div class="info num" id="infoMob">dont mobilisable <b>${eur(mobil)}</b> (${mobNoms})</div>
     ${richesseChart(D)}`;
 
+const opsHtml = ops => ops.length ? `<div class="ops">${ops.map(o=>`<div class="op num"><span class="d">${o.date.slice(8,10)}/${o.date.slice(5,7)}</span><span class="t">${o.libelle}${o.qui?`<small>· ${o.qui}</small>`:''}</span><span class="m">${eur(o.montant)}</span></div>`).join('')}</div>` : '<div class="hint">Aucune dépense ce mois-ci.</div>';
   const dep = D.cartes.reduce((s,c)=>s+c.depense,0), bud = D.cartes.reduce((s,c)=>s+c.budget,0);
   document.getElementById('depenses').innerHTML = `
-    <h2>Dépenses du mois en cours${exIf('cartes')}</h2>
+    <h2>Dépenses CB${exIf('cartes')}</h2>
     <div class="big num">${eur(dep)}</div>
     <div class="sub num">soit <b>${pct(dep,bud)} %</b> de la cible (${eur(bud)})</div>
     ${D.cartes.map(c=>`
       <div class="row">
         <div class="lbl num"><span>${c.nom}</span><span>${eur(c.depense)} / ${eur(c.budget)} · ${pct(c.depense,c.budget)} %</span></div>
         ${bar(c.depense,c.budget)}
-      </div>`).join('')}`;
+      </div>`).join('')}
+    ${opsHtml(D.cartesOps)}`;
+
+  document.getElementById('depComptes').innerHTML = `
+    <h2>Dépenses comptes${exIf('depComptes')}</h2>
+    <div class="big num">${eur(D.depComptes.total)}</div>
+    <div class="sub">${D.depComptes.comptes} · mois en cours</div>
+    ${opsHtml(D.depComptes.ops)}`;
 
   document.getElementById('objectifs').innerHTML = `
     <h2>Atteinte des objectifs${exIf('prets')}</h2>
@@ -469,6 +510,7 @@ function renderAccList(){
 const EDITORS = {
   cartes:{titre:'Cartes (dépenses du mois)', champs:[
     ['nom','Nom','text'],['compte','Compte','account'],['filtre','Mot-clé dans le libellé (facultatif)','text'],['budget','Budget mensuel (€)','number']]},
+  depComptes:{titre:'Dépenses comptes', champs:[['compte','Compte','account']]},
   prets:{titre:'Prêts', champs:[
     ['nom','Nom','text'],['mensualite','Mensualité (€)','number'],['debut','1re échéance','date'],['fin','Dernière échéance','date']]},
   poches:{titre:'Poches (une poche = un compte)', champs:[
@@ -509,6 +551,10 @@ async function doSync(full){
   $('fullSync').addEventListener('click', ()=>doSync(true));
   $('wipe').addEventListener('click', ()=>{ try{ localStorage.removeItem(K_CFG); localStorage.removeItem(K_CACHE); }catch(e){}
     CFG={token:'',accounts:{}}; CACHE=null; $('token').value=''; $('relais').value=''; renderAccList(); renderEditors(); setStatus(''); render(); });
+  $('richesse').addEventListener('click', e=>{
+    if(e.target.id!=='infoBtn') return;
+    const p=$('infoMob'), o=p.classList.toggle('open'); e.target.setAttribute('aria-expanded', o);
+  });
   $('editors').addEventListener('change', e=>{
     const t=e.target, k=t.dataset.l; if(!k) return;
     CFG[k][+t.dataset.i][t.dataset.f] = t.type==='checkbox' ? t.checked : t.value;
@@ -530,7 +576,7 @@ $('copyCfg').addEventListener('click', async ()=>{
     try{
       const o = JSON.parse($('cfgText').value.trim());
       if(!o || typeof o!=='object' || Array.isArray(o)) throw 0;
-      ['accounts','cartes','prets','poches','relais'].forEach(k=>{ if(o[k]!==undefined) CFG[k]=o[k]; });
+      ['accounts','cartes','prets','poches','relais','depComptes'].forEach(k=>{ if(o[k]!==undefined) CFG[k]=o[k]; });
       save(K_CFG,CFG); $('cfgText').value=''; renderAccList(); renderEditors(); render();
       setStatus('Réglages importés.');
     }catch(e){ setStatus('Texte non reconnu : recopie les réglages depuis l\'autre appareil.'); }
