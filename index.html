@@ -168,7 +168,7 @@
     <div class="ed"><h4>Copier vers un autre appareil</h4>
       <p class="muted" style="margin-top:0">Copie les comptes, cartes, prêts, poches, la répartition et l'adresse du relais. Le jeton n'est ajouté que si tu coches la case. Sur l'autre appareil, colle le texte ci-dessous puis Importer.</p>
       <label style="display:flex;align-items:center;gap:8px;margin:6px 0 0;color:var(--ink)"><input type="checkbox" id="withToken" style="width:22px;height:22px"> Inclure le jeton d'API (à ne partager que par un canal sûr)</label>
-      <div class="acts" style="margin-top:6px"><button id="copyCfg">Copier les réglages</button></div>
+      <div class="acts" style="margin-top:6px"><button id="shareCfg">Partager (AirDrop…)</button><button id="copyCfg">Copier les réglages</button></div>
       <textarea id="cfgText" rows="3" style="width:100%;font-size:16px;margin-top:8px;padding:8px;border:1px solid var(--line);border-radius:10px" placeholder="Colle ici les réglages copiés"></textarea>
       <div class="acts" style="margin-top:6px"><button id="importCfg">Importer</button></div>
     </div>
@@ -701,15 +701,21 @@ async function doSync(full){
     else return;
     save(K_CFG,CFG); renderEditors(); render();
   });
-$('copyCfg').addEventListener('click', async ()=>{
-    const {token, ...rest} = CFG;
-    // Code sans guillemets ni accents (base64) : résiste aux Notes, Mots de passe, messageries
-    const txt = 'PM1:' + btoa(unescape(encodeURIComponent(JSON.stringify($('withToken').checked ? CFG : rest))));
+// Code sans guillemets ni accents (base64) : résiste aux Notes, Mots de passe, messageries
+  const codeReglages = () => { const {token, ...rest} = CFG;
+    return 'PM1:' + btoa(unescape(encodeURIComponent(JSON.stringify($('withToken').checked ? CFG : rest)))); };
+  $('shareCfg').addEventListener('click', async ()=>{
+    const url = location.origin + location.pathname + '#import=' + codeReglages();
+    try{ await navigator.share({title:'Pocket-Money : réglages', url}); setStatus('Lien envoyé : sur l\'autre appareil, ouvre-le pour importer les réglages.'); }
+    catch(e){ if(e && e.name==='AbortError') return;
+      try{ await navigator.clipboard.writeText(url); setStatus('Partage indisponible : lien copié, envoie-le par AirDrop ou message.'); }catch(_){ $('cfgText').value=url; } }
+  });
+  $('copyCfg').addEventListener('click', async ()=>{
+    const txt = codeReglages();
     try{ await navigator.clipboard.writeText(txt); setStatus('Réglages copiés : colle-les dans les Réglages de l\'autre appareil.'); }
     catch(e){ $('cfgText').value = txt; $('cfgText').select(); setStatus('Copie automatique refusée : le texte est sélectionné dans le champ, copie-le à la main.'); }
   });
-  $('importCfg').addEventListener('click', ()=>{
-    const saisi = $('cfgText').value;
+  const importer = saisi => {
     const sansBlancs = saisi.replace(/[\s\u200B\u2028\u2029]+/g,'');
     let o = null;
     try{
@@ -734,7 +740,14 @@ $('copyCfg').addEventListener('click', async ()=>{
     setStatus(partiel ? 'Seuls le jeton et/ou le relais ont pu être récupérés : synchronisation…'
                       : avecJeton ? 'Réglages et jeton importés : synchronisation…' : 'Réglages importés.');
     if(avecJeton){ CACHE=null; try{ localStorage.removeItem(K_CACHE); }catch(e){} doSync(true); }
-  });
+  };
+  $('importCfg').addEventListener('click', ()=>importer($('cfgText').value));
+  // Ouverture d'un lien de partage : …#import=PM1:…
+  if(location.hash.startsWith('#import=')){
+    const code = decodeURIComponent(location.hash.slice(8));
+    history.replaceState(null,'',location.pathname);
+    setTimeout(()=>importer(code), 0);
+  }
   $('accList').addEventListener('change', e=>{
     const t=e.target; if(!t.dataset.id) return;
     CFG.accounts[t.dataset.id] = {...accCfg(CACHE.accounts.find(a=>a.id===t.dataset.id)), [t.dataset.k]: t.checked};
