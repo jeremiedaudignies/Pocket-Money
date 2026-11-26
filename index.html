@@ -290,6 +290,10 @@ async function fetchAll(path, key, params){
 }
 
 /* Synchronisation : complète une fois par jour (ou sur demande), sinon uniquement les opérations modifiées */
+// Lit un montant sous forme de nombre, de texte ou d'objet {value}
+const montant = v => { if(v==null) return null; if(typeof v==='object') v = v.value ?? v.amount;
+  const n = typeof v==='string' ? parseFloat(v.replace(',','.')) : v; return Number.isFinite(n) ? n : null; };
+
 async function sync(forceFull){
   if(!CFG.token) return false;
   const now=new Date(), today=now.toISOString().slice(0,10);
@@ -305,8 +309,8 @@ async function sync(forceFull){
       [r.payee, r.payer, r.note, r.counterParty].filter(Boolean).join(' ').toLowerCase()];
   });
   CACHE = {v:2, accounts: accounts.map(a=>({id:a.id, name:a.name, type:a.accountType, archived:a.archived,
-            exclude:a.excludeFromStats, initial:Number(a.initialBalance?.value)||0,
-            balance: (a.balance && typeof a.balance.value==='number') ? a.balance.value : null})),
+            exclude:a.excludeFromStats, initial: montant(a.initialBalance) ?? 0,
+            balance: montant(a.balance) ?? montant(a.currentBalance) ?? montant(a.actualBalance) ?? null})),
            records, lastSync: now.toISOString(), lastFull: full ? today : CACHE.lastFull};
   if(!save(K_CACHE, CACHE)) setStatus("Mémoire de l'appareil pleine : les données ne sont pas conservées entre deux ouvertures.");
   return true;
