@@ -703,7 +703,8 @@ async function doSync(full){
   });
 // Code sans guillemets ni accents (base64) : résiste aux Notes, Mots de passe, messageries
   const codeReglages = () => { const {token, ...rest} = CFG;
-    return 'PM1:' + btoa(unescape(encodeURIComponent(JSON.stringify($('withToken').checked ? CFG : rest)))); };
+    const b64 = btoa(unescape(encodeURIComponent(JSON.stringify($('withToken').checked ? CFG : rest))));
+    return 'PM1:' + b64.replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }; // base64url : aucun caractère spécial
   $('shareCfg').addEventListener('click', async ()=>{
     const url = location.origin + location.pathname + '#import=' + codeReglages();
     try{ await navigator.share({title:'Pocket-Money : réglages', url}); setStatus('Lien envoyé : sur l\'autre appareil, ouvre-le pour importer les réglages.'); }
@@ -715,19 +716,33 @@ async function doSync(full){
     try{ await navigator.clipboard.writeText(txt); setStatus('Réglages copiés : colle-les dans les Réglages de l\'autre appareil.'); }
     catch(e){ $('cfgText').value = txt; $('cfgText').select(); setStatus('Copie automatique refusée : le texte est sélectionné dans le champ, copie-le à la main.'); }
   });
+  // Décode un code PM1 même abîmé (encodage d'URL, + devenus espaces, retours à la ligne, troncature)
+  const decodePM = saisi => {
+    let t = String(saisi);
+    for(let i=0;i<3 && /%[0-9A-Fa-f]{2}/.test(t);i++){ try{ t = decodeURIComponent(t); }catch(e){ break; } }
+    const m = t.match(/PM1:([A-Za-z0-9+/=_\- \r\n\t\u200B]+)/); if(!m) return null;
+    let b = m[1].replace(/[\r\n\t\u200B]/g,'').replace(/ /g,'+').replace(/-/g,'+').replace(/_/g,'/').replace(/[^A-Za-z0-9+/]/g,'');
+    if(b.length % 4 === 1) b = b.slice(0,-1);            // caractère orphelin (troncature)
+    while(b.length % 4) b += '=';                       // complète le remplissage base64
+    let texte = '';
+    try{ const bin = atob(b); texte = new TextDecoder().decode(Uint8Array.from(bin, c=>c.charCodeAt(0))); }catch(e){ return null; }
+    try{ const o = JSON.parse(texte); if(o && typeof o==='object' && !Array.isArray(o)) return o; }catch(e){}
+    return {__partiel: texte};   // texte tronqué : on tentera d'en extraire le jeton et le relais
+  };
   const importer = saisi => {
     const sansBlancs = saisi.replace(/[\s\u200B\u2028\u2029]+/g,'');
-    let o = null;
-    try{
-      const m = sansBlancs.match(/PM1:([A-Za-z0-9+/=]+)/);
-      if(m) o = JSON.parse(decodeURIComponent(escape(atob(m[1]))));
-      else o = JSON.parse(saisi.replace(/[\u201C\u201D\u201E\u00AB\u00BB]/g,'"').replace(/[\u2018\u2019]/g,"'")
-                                .replace(/[\r\n\u2028\u2029\u200B\u00A0]+/g,'').trim());
-      if(!o || typeof o!=='object' || Array.isArray(o)) o = null;
-    }catch(e){ o = null; }
+    let o = null, source = sansBlancs;
+    const pm = decodePM(saisi);
+    if(pm && !pm.__partiel) o = pm;
+    else if(pm) source = pm.__partiel.replace(/\s+/g,'');
+    if(!o && !/PM1:/.test(saisi)){
+      try{ o = JSON.parse(saisi.replace(/[“”„«»]/g,'"').replace(/[‘’]/g,"'")
+                               .replace(/[\r\n\u2028\u2029\u200B\u00A0]+/g,'').trim());
+           if(!o || typeof o!=='object' || Array.isArray(o)) o = null; }catch(e){ o = null; }
+    }
     // Dernier recours : récupérer au moins le jeton et l'adresse du relais
     if(!o){
-      const jeton = sansBlancs.match(/eyJ[\w-]+\.[\w-]+\.[\w-]+/), relais = sansBlancs.match(/https:\/\/[\w.-]+\.workers\.dev/);
+      const jeton = source.match(/eyJ[\w-]+\.[\w-]+\.[\w-]+/), relais = source.match(/https:\/\/[\w.-]+\.workers\.dev/);
       if(jeton || relais) o = {...(jeton?{token:jeton[0]}:{}), ...(relais?{relais:relais[0]}:{})};
     }
     if(!o){ setStatus(`Texte non reconnu (${saisi.length} caractères reçus) : recopie les réglages depuis l'autre appareil.`); return; }
