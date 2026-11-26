@@ -702,25 +702,38 @@ async function doSync(full){
     save(K_CFG,CFG); renderEditors(); render();
   });
 $('copyCfg').addEventListener('click', async ()=>{
-    const {token, ...rest} = CFG; const txt = JSON.stringify($('withToken').checked ? CFG : rest);
+    const {token, ...rest} = CFG;
+    // Code sans guillemets ni accents (base64) : résiste aux Notes, Mots de passe, messageries
+    const txt = 'PM1:' + btoa(unescape(encodeURIComponent(JSON.stringify($('withToken').checked ? CFG : rest))));
     try{ await navigator.clipboard.writeText(txt); setStatus('Réglages copiés : colle-les dans les Réglages de l\'autre appareil.'); }
     catch(e){ $('cfgText').value = txt; $('cfgText').select(); setStatus('Copie automatique refusée : le texte est sélectionné dans le champ, copie-le à la main.'); }
   });
   $('importCfg').addEventListener('click', ()=>{
+    const saisi = $('cfgText').value;
+    const sansBlancs = saisi.replace(/[\s\u200B\u2028\u2029]+/g,'');
+    let o = null;
     try{
-      const brut = $('cfgText').value
-        .replace(/[\u201C\u201D\u201E\u00AB\u00BB]/g,'"').replace(/[\u2018\u2019]/g,"'") // guillemets typographiques
-        .replace(/[\r\n\u2028\u2029\u200B\u00A0]+/g,'').trim();                         // retours à la ligne, espaces invisibles
-      const o = JSON.parse(brut);
-      if(!o || typeof o!=='object' || Array.isArray(o)) throw 0;
-      ['accounts','cartes','prets','poches','relais','depComptes','budget'].forEach(k=>{ if(o[k]!==undefined) CFG[k]=o[k]; });
-      const avecJeton = typeof o.token==='string' && o.token.replace(/\s+/g,'');
-      if(avecJeton) CFG.token = avecJeton;
-      save(K_CFG,CFG); $('cfgText').value=''; $('token').value=CFG.token; $('relais').value=CFG.relais||'';
-      renderAccList(); renderEditors(); render();
-      setStatus(avecJeton ? 'Réglages et jeton importés : synchronisation…' : 'Réglages importés.');
-      if(avecJeton){ CACHE=null; try{ localStorage.removeItem(K_CACHE); }catch(e){} doSync(true); }
-    }catch(e){ setStatus('Texte non reconnu : recopie les réglages depuis l\'autre appareil.'); }
+      const m = sansBlancs.match(/PM1:([A-Za-z0-9+/=]+)/);
+      if(m) o = JSON.parse(decodeURIComponent(escape(atob(m[1]))));
+      else o = JSON.parse(saisi.replace(/[\u201C\u201D\u201E\u00AB\u00BB]/g,'"').replace(/[\u2018\u2019]/g,"'")
+                                .replace(/[\r\n\u2028\u2029\u200B\u00A0]+/g,'').trim());
+      if(!o || typeof o!=='object' || Array.isArray(o)) o = null;
+    }catch(e){ o = null; }
+    // Dernier recours : récupérer au moins le jeton et l'adresse du relais
+    if(!o){
+      const jeton = sansBlancs.match(/eyJ[\w-]+\.[\w-]+\.[\w-]+/), relais = sansBlancs.match(/https:\/\/[\w.-]+\.workers\.dev/);
+      if(jeton || relais) o = {...(jeton?{token:jeton[0]}:{}), ...(relais?{relais:relais[0]}:{})};
+    }
+    if(!o){ setStatus(`Texte non reconnu (${saisi.length} caractères reçus) : recopie les réglages depuis l'autre appareil.`); return; }
+    ['accounts','cartes','prets','poches','relais','depComptes','budget'].forEach(k=>{ if(o[k]!==undefined) CFG[k]=o[k]; });
+    const avecJeton = typeof o.token==='string' && o.token.replace(/\s+/g,'');
+    if(avecJeton) CFG.token = avecJeton;
+    save(K_CFG,CFG); $('cfgText').value=''; $('token').value=CFG.token; $('relais').value=CFG.relais||'';
+    renderAccList(); renderEditors(); render();
+    const partiel = !o.budget && !o.accounts;
+    setStatus(partiel ? 'Seuls le jeton et/ou le relais ont pu être récupérés : synchronisation…'
+                      : avecJeton ? 'Réglages et jeton importés : synchronisation…' : 'Réglages importés.');
+    if(avecJeton){ CACHE=null; try{ localStorage.removeItem(K_CACHE); }catch(e){} doSync(true); }
   });
   $('accList').addEventListener('change', e=>{
     const t=e.target; if(!t.dataset.id) return;
